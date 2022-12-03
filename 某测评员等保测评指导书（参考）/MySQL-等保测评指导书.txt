@@ -1,0 +1,123 @@
+1、身份鉴别
+密码复杂度、账户唯一性
+查看数据库所在安装目录下my.cnf/my.ini文件，其中是否不包含“skip-grant-tables”参数，不允许跳过数据库权限验证；（一般位于/etc/my.cnf,或通过mysql --help|grep 'my.cnf'查找）。
+
+root用户下，切换到mysql用户:su - mysql；mysql -u root -p,查看是否需要密码登陆。
+
+登录mysql,执行select user,host from mysql.user;
+查看数据库所有用户，核查是否有用户名和host均相同的用户（注：host和username是联合主键，同一用户可能有多个host，不算为身份标识不唯一。）
+
+执行select user,password from mysql.user;
+查看是否存在空口令账户；（注：MySQL5.7以上版本password字段修改为authentication_string。）
+
+Mysql5.6以下版本不能自定义密码复杂度和更换周期；
+
+Mysql5.6.6以上版本，使用命令
+#mysql> show variables like 'validate%';
+核查数据库是否配置密码复杂度策略，如：
+validate_password_length             8
+validate_password_mixed_case_count   1
+validate_password_number_count       1
+validate_password_policy             MEDIUM
+validate_password_special_char_count 1
+其中validate_password_policy不能配置为LOW，须为MEDIUM或STRONG。
+
+Mysql5.7.4以上版本，登录数据库，使用命令
+#mysql> show variables like 'default_password_lifetime';
+或查看数据库所在安装目录下my.cnf/my.ini文件,其中是否设置全局变量default_password_lifetime来限制密码过期策略。
+
+
+登陆失败处理和超时
+Mysql数据库不能自定义登录失败处理策略，使用命令show plugins;或
+select * from information_schema.plugins where plugin_name like '%connection%';
+
+查看是否安装connect_control和connect_control_failed_login_attempts插件。如果已经安装相关插件，使用命令show variables like 'conn%control%'，查看是否配置登录失败锁定策略。
+注：
+connection_control_failed_connections_threshold：登录失败次数阈值。connection_control_min_connection_delay：登录失败后最短锁定毫秒数。connection_control_max_connection_delay：登录失败后最长锁定毫秒数。
+
+
+#mysql> show variables like '%timeout%';
+查看interactive_timeout（针对交互式连接）的值是否合理；
+
+测试长时间不操作，数据库是否能自动断开连接。
+
+
+远程管理
+Mysql数据库为安全考虑应禁用远程管理功能，以保证管理数据库的用户首先需要登录操作系统。使用命令
+select user, host from mysql.user where host!=’localhost’
+查看user表中是否不存在可远程管理的账户。核查操作系统配置的安全策略能否满足要求；
+如果使用了远程管理功能，则使用数据库管理客户端连接数据库时，口令默认使用哈希算法加密传输。使用抓包工具测试是否能获取数据库明文口令信息。
+注：MySQL数据库默认符合。
+
+2、访问控制
+权限分配
+select * from mysql.user;和select * from mysql.db;
+查看数据库中用户的权限策略，是否存在不必要的权限设置；
+
+登录mysql,执行show database like 'test';
+核查是否已删除测试数据库；
+
+select user, host from mysql.user where host!=’localhost’
+查看是否限制数据库管理员的远程登录权限。
+
+
+
+重命名默认账户
+登入mysql，执行select user from mysql.user
+查看是否存在未更名的默认账户，如root用户；注：修改root账户名可能导致应用程序错误，故不强制要求重命名。
+
+Mysql5.7以上版本，使用命令select user,host,account_locked from mysql.user;
+核查mysql.session和mysql.sys默认账户是否已锁定（默认锁定）；
+
+在数据库服务器使用命令grep "temporary password" /var/log/mysqld.log
+查看数据库安装时的随机密码，并使用该密码尝试登录数据库，核查是否成功。
+
+
+
+删除过期账户
+进入mysql，执行select user from mysql.user
+查看数据库所有用户，并访谈管理员说明每个用户的功能，核查是否存在多余或过期账户；
+
+进入mysql，执行select user from mysql.user
+查看数据库所有用户。访谈数据库管理员、安全员和审计员，核查不同用户是否采用不同账户登录系统。
+
+
+最小权限、权限分离
+进入mysql，执行select * from user;
+查看用户权限列表，一般用户应当只有select、insert或update权限，只有管理员才能有所需的管理权限；
+
+MySQL数据库不具备安全标记功能，默认不符合；
+
+
+3、安全审计
+进入mysql，执行show variables like '%log%';
+查看是否开启了重要日志功能，如错误日志（log_error）、查询日志（general_log）、二进制日志（log_bin）；
+
+进入mysql，执行show variables like '%log%
+根据general_log_file查找general_log查询日志位置，或登录数据库所在服务器，使用命令cat /etc/my.cnf，查找log_bin二进制日志位置。查看日志内容，是否对所有用户的sql命令均进行记录。
+（如开启日志则默认符合）；
+
+进入mysql，执行show variables like '%log%
+查看重要日志保存位置，查看各日志文件，核查是否对数据库重要的用户行为和重要安全事件进行审计。
+注：general_log可记录所有用户的sql查询语句，但影响效率；log_bin记录所有数据修改；log_error记录数据库错误事件。
+
+
+4、入侵防范
+登录mysql,执行select user，host from mysql.user;
+查看数据库是否限制账户的登录地址范围，如限制root的host为localhost，仅可本地登录等。
+预期结果：执行步骤1），已对用户的登录地址范围进行了限制，host列不存在‘%’；
+
+select version ();
+
+
+
+
+
+
+
+
+
+
+
+
+

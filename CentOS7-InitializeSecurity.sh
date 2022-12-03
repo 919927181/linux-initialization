@@ -1,34 +1,38 @@
 #!/bin/bash
 #
 # @Author: liyanjing，@E-mail: 284223249@qq.com, @wechat: Sd-LiYanJing
-# @CreateTime:  2022-10-18 10:30 , @Last ModifiedTime: 2022-10-28 16:55
+# @CreateTime:  2022-10-18 10:30 , @Last ModifiedTime: 2022-12-03 13:50
 # @Github: https://github.com/919927181/linux-initialization.git
-# @Version: 3.5
+# @Version: 3.6
 # @用途：适用于企业内部 CentOS7 系列服务器初始化、系统安全加固
 # @参考：https://github.com/WeiyiGeek/SecOpsDev/tree/master/OS-%E6%93%8D%E4%BD%9C%E7%B3%BB%E7%BB%9F/Linux
+# @问题：若设置了用户登陆超时，需要执行 source /etc/profile时，报错 -bash: TMOUT: readonly variable，解决 vi /etc/profile将#export TMOUT #readonly TMOUT 注释掉。 
 ## ----------------------------------------- ##
 # @包含：
 #
 # [0]  创建SWAP交换分区(默认2G) 
-# [1]  设置国内yum源并在线yum安装常用软件
-# [2]  网卡设置静态IP(根据提示，输入ip\子网掩码\默认网关），设置DNS
-# [3]  系统优化、安全加固等一键设置以下：
+# [1]  设置网卡静态IP和DNS(按引导输入ip\子网掩码\默认网关)
+#      + <11> 全局配置DNS
+#      + <12> 判断能不能上网
+# [2]  在线设置国内yum源，在线yum安装常用软件（htop\ncdu比du性能强\...）
+# [3]  系统优化、安全加固等一键设置：
 #      + <31> 系统的最大文件打开数限制，系统内核参数优化(含关闭ipv6)
-#      + <32> 主机时区设置为东8区
-#      + <33> 禁用ctrl+alt+del重启系统、定义回收站目录等安全运维有关的事项
-#      + <  > 系统安全加固(等保三级操作系统主机检查项)如下：
+#      + <32> 时区设置为东8区
+#      + <33> 禁用ctrl+alt+del重启系统、定义回收站目录等
+#      + <  > 系统安全加固(等保三级-操作系统检查项)如下：
 #              ++ <35> 用户口令策略(密码过期90天、到期前15天提示、密码长度至少15等)
 #              ++ <36> GRUB 安全设置
 #              ++ <37> ssh安全加固设置
 #              ++ <38> 设置或恢复重要目录和文件的权限
 #              ++ <39> 开启防火墙、禁用SELINUX等更多设置，然后重启主机
-# [4]  更改ssh登陆端口号(默认改为40107)
-# [5]  创建一个拥有管理权限的(默认uudocker)普通用户，执行sodu命令需要输入密码
-# [6]  使用Chrony配置主机时间同步(根据实际环境进行，可选项)
-# [7]  禁用与设置系统中的某些服务(根据实际环境进行，可选项)
-# [8]  强制用户在下次登录时更改密码
-# [9]  清空垃圾回收站（无意中执行rm误删时，它可拯救你）
-# [10] 判断能不能上网
+# [4]  更改ssh端口号(等保要求不使用22端口，缺省时改为40107)
+# [5]  创建一个拥有管理权限的普通用户(uudocker)，执行sodu命令时需要输入密码
+# [6]  禁止或允许root用户远程登陆(等保要求禁止root远程登陆,正解:普通用户登陆后su root）
+# [7]  强制用户在下次登录时更改密码
+# [8]  使用Chrony配置主机时间同步(根据环境需要，可选项)
+# [9]  禁用与设置系统中的某些服务(根据环境需要，可选项)
+# [10] 清空回收站内容 and 询问你删除回收站功能吗？（执行rm误删时，它可拯救你）
+#
 # 以下脚本，仅供参考：
 #       Os_Kernel_Upgrade 推荐"离线升级系统内核"
 #       disk_Lvsmanager 磁盘LVS逻辑卷添加与配置\033[32m
@@ -74,7 +78,6 @@ log_warning() {
   sleep 5
 }
 
-
 ## 公共方法-验证否为数字
 function isValidNum() {
 
@@ -99,7 +102,7 @@ function isValidIp() {
  
 	if [[ $ip =~ ^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}.[0-9]{1,3}$ ]]; then
 		ip=(${ip//\./ }) # 按.分割，转成数组，方便下面的判断
-		[[ ${ip[0]} -le 255 && ${ip[1]} -le 255 && ${ip[2]} -le 255 && ${ip[2]} -le 255 ]]
+		[[ ${ip[0]} -le 255 && ${ip[1]} -le 255 && ${ip[2]} -le 255 && ${ip[3]} -le 255 ]]
 		ret=$?
 	else   
         echo "IP format error!"   
@@ -131,6 +134,22 @@ function internetCheck()
     return 0
 }
 
+## 公共方法-设置DNS
+function setDNS()
+{
+  log_info "[-] DNS域名解析服务设置..."
+  # DNS服务器地址
+  DNSIP=("114.114.114.114" "223.5.5.5" "8.8.8.8" "8.8.4.4" )
+  cp -a /etc/resolv.conf  ${BACKUPDIR}/resolv.conf.bak
+  for dns in  ${DNSIP[@]};do 
+    egrep -q "^nameserver .*${dns}$" /etc/resolv.conf && sed -ri "s/^nameserver.*${dns}$/nameserver ${dns}/" /etc/resolv.conf || echo "nameserver ${dns}" >> /etc/resolv.conf
+  done
+
+  log_info "[*] restarting Network........."
+  service network restart && ip addr
+  
+  log_warning "\nDNS域名解析服务设置完毕，请ping下百度试试吧..."; 
+}
 
 ## 名称: Os_Swap
 ## 用途: Liunx 系统创建SWAP交换分区(默认2G) ，无论物理内存多大，都统一设置成2G即可 - 请按需调用执行
@@ -192,7 +211,7 @@ Os_YumSource_Aliyun() {
 
 
 ## 名称: Os_Yum_Install_Software
-## 用途: 安装常用的软件
+## 用途: 安装常用的软件\工具
 ## 参数: 无
 Os_Yum_Install_Software() {
 
@@ -200,7 +219,7 @@ Os_Yum_Install_Software() {
   yum install -y gcc gcc-c++ g++ make jq libpam-cracklib openssl-devel bzip2-devel
   # 常规软件
   yum install -y nano vim git unzip wget ntpdate dos2unix net-tools policycoreutils-python
-  yum install -y tree htop ncdu nload sysstat psmisc bash-completion fail2ban nfs-utils chrony
+  yum install -y tree htop ncdu nload sysstat psmisc bash-completion fail2ban nfs-utils chrony lsof
   # 清空缓存和已下载安装的软件包
   yum clean all
 
@@ -216,12 +235,7 @@ Os_Optimizationn() {
   log_info "[-] 正在进行操作系统内核参数优化设置......."
 
   # (1) Linux 系统的最大进程数和最大文件打开数限制
-  log_info "[-] Linux 系统的最大进程数和最大文件打开数限制 "
-  egrep -q "^\s*ulimit -HSn\s+\w+.*$" /etc/profile && sed -ri "s/^\s*ulimit -HSn\s+\w+.*$/ulimit -HSn 102400/" /etc/profile || echo "ulimit -HSn 102400" >> /etc/profile
-  egrep -q "^\s*ulimit -HSu\s+\w+.*$" /etc/profile && sed -ri "s/^\s*ulimit -HSu\s+\w+.*$/ulimit -HSu 102400/" /etc/profile || echo "ulimit -HSu 102400" >> /etc/profile
-  source /etc/profile
- 
-  # 先删除掉以前设置的，然后再在# End 上面增加以下内容
+  # 修改用户级的限制，先删除掉以前设置的，然后再在# End 上面增加以下内容
   sed -i '/^*/d' /etc/security/limits.conf
   sed -i "/# End/i *  soft  nofile  102400" /etc/security/limits.conf
   sed -i "/# End/i *  hard  nofile  102400" /etc/security/limits.conf
@@ -230,7 +244,6 @@ Os_Optimizationn() {
   
   # (2) 系统内核参数的配置
   log_info "[-] 系统内核参数的配置 "
-
   # sysctl -p报错 sysctl: nf_conntrack_xxxx: No such file or directory
   conntrack_str=$(lsmod | grep conntrack)
   if [[ "$conntrack_str" = "" ]]; then
@@ -316,9 +329,9 @@ net.ipv4.tcp_syn_retries = 1
 net.ipv4.tcp_syncookies = 1
   
 net.ipv4.tcp_fin_timeout = 1
-##当keepalive起用的时候TCP发送keepalive消息的频度缺省是2小时
-##nginx做反向代理，为了快速释放链接，超时时间配置短一些，这样可以处理更高的并发。但是如果提供tomcat、数据库等服务的话，就要配置长一些，来达到稳定的效果
-##tcp连接保持1200秒（20分钟），然后经过 3次探测 * 30秒后被丢弃
+##keepalive启用时，TCP发送keepalive消息的频度缺省是2小时
+##nginx做反向代理，为了快速释放链接，超时时间配置短一些，这样可以处理更高的并发。但是如果供tomcat、数据库等服务的话，就要配置长一些，来达到稳定的效果
+##tcp空闲连接保持1200秒（20分钟），然后经过 3次探测 * 30秒后被丢弃
 net.ipv4.tcp_keepalive_time = 1200
 net.ipv4.tcp_keepalive_intvl= 30
 net.ipv4.tcp_keepalive_probes= 3
@@ -369,11 +382,12 @@ EOF
 Os_TimedataZone() {
 
   log_info "[*] 系统时间时区配置相关脚本,开始执行..."
-
+  
   # (1) 时区设置东8区，date -R查看系统时间 
   log_info "[*] 时区设置前的时间: $(date -R) "
-  timedatectl  
-  ln -sf /usr/share/zoneinfo/Asia/Shanghai /etc/localtime
+  timedatectl set-timezone Asia/Shanghai
+  echo 'Asia/Shanghai' >/etc/timezone
+  timedatectl set-local-rtc 1
 
 }
 
@@ -509,15 +523,14 @@ Os_Security_UserPwd () {
   touch /etc/security/opasswd && chown root:root /etc/security/opasswd && chmod 600 /etc/security/opasswd 
   
   # 此参数需要根据业务来定，否则在使用时候会出现某些权限不足导致程序安装报错
-  #log_info "[-] 配置用户 umask 为022 "
-  #cp -a /etc/profile ${BACKUPDIR}/profile
-  #egrep -q "^\s*umask\s+\w+.*$" /etc/profile && sed -ri "s/^\s*umask\s+\w+.*$/umask 022/" /etc/profile || echo "umask 022" >> /etc/profile 
-  #source /etc/profile
-
-  # log_info "[-] 设置用户创建目录的默认权限, (初始为077比较严格)在未设置umask为027则默认为077"
+  log_info "[-] 配置用户 umask 为022 "
+  cp -a /etc/profile ${BACKUPDIR}/profile
+  egrep -q "^\s*umask\s+\w+.*$" /etc/profile && sed -ri "s/^\s*umask\s+\w+.*$/umask 022/" /etc/profile || echo "umask 022" >> /etc/profile
+  source /etc/profile
+  #log_info "[-] 设置用户目录创建默认权限, (初始为077比较严格)在未设置umask为027则默认为077"
   #egrep -q "^\s*umask\s+\w+.*$" /etc/csh.login && sed -ri "s/^\s*umask\s+\w+.*$/umask 022/" /etc/csh.login || echo "umask 022" >> /etc/csh.login
   #egrep -q "^\s*umask\s+\w+.*$" /etc/csh.cshrc && sed -ri "s/^\s*umask\s+\w+.*$/umask 022/" /etc/csh.cshrc || echo "umask 022" >> /etc/csh.cshrc
-  #egrep -q "^\s*(umask|UMASK)\s+\w+.*$" /etc/login.defs && sed -ri "s/^\s*(umask|UMASK)\s+\w+.*$/UMASK 027/" /etc/login.defs || echo "UMASK 027" >> /etc/login.defs
+
 
 }
 
@@ -588,23 +601,26 @@ Os_Security_Ssh () {
   log_info "[-] 远程SSH登录前后提示警告Banner设置"
   # SSH登录前后提示警告Banner设置
   sudo tee /etc/issue <<'EOF'
-****************** [ 安全登陆 (Security Login) ] *****************
-Authorized only. All activity will be monitored and reported.By Security Center.
+******************* [ 安全登陆 (Security Login) ] ******************* 
+您的所有活动都将被安全中心监控和报告.
+All activities will be monitored and reported by the security center.
 EOF
   # SSH登录后提示Banner
   # 艺术字B格: http://www.network-science.de/ascii/
   sudo tee /etc/motd <<'EOF'
-##################[ 安全运维 (Security Operation) ]####################
-            __          __  _       _  _____           _    
-            \ \        / / (_)     (_)/ ____|         | |   
-            \ \  /\  / /__ _ _   _ _| |  __  ___  ___| | __
-              \ \/  \/ / _ \ | | | | | | |_ |/ _ \/ _ \ |/ /
-              \  /\  /  __/ | |_| | | |__| |  __/  __/   < 
-                \/  \/ \___|_|\__, |_|\_____|\___|\___|_|\_\
-                              __/ |                        
-                              |___/              
-                                                    
-Login success. Please execute the commands and operation data after carefully.
+################## [ 安全运维 (Security Operation) ] ##################
+               _    _                  _ _           
+              | |  (_)_  _ __ _ _ _ _ | (_)_ _  __ _  
+              | |__| | || / _` | ' \ || | | ' \/ _` |  
+              |____|_|\_, \__,_|_||_\__/|_|_||_\__, | 
+                      |__/                     |___/   
+                                                   
+※ 不用22/3306/6379/等高危默认端口, 不对 Internet 开放; 密码设置足够强壮.
+※ WEB应用上线前须做安全渗透测试; 系统/软件/等定期打补丁.
+※ 跳板机尽量将SSH限制IP在最小化范围内.
+
+登录成功, 请仔细执行命令和操作数据.
+Login success. Please execute the command and operation data carefully.
 EOF
 
   # (5) 用户远程登录失败次数与终端超时设置 
@@ -653,17 +669,15 @@ EOF
   source /etc/profile.d/history-record.sh
 
   log_info "[-] 关闭执行命令时提示：You have new mail in /var/spool/mail/root "
-  egrep -q "unset MAILCHECK" /etc/profile && sed -ri "s/unset MAILCHECK/unset MAILCHECK/" /etc/profile || echo -e "unset MAILCHECK" >> /etc/profile
-	
-	
+  egrep -q "unset MAILCHECK" /etc/profile && sed -ri "s/unset MAILCHECK/unset MAILCHECK/" /etc/profile || echo -e "unset MAILCHECK" >> /etc/profile	
   source /etc/profile
   ls -lth /var/spool/mail/
   cat /dev/null > /var/spool/mail/root
   
   log_info "[-] 设置登录超时时间为10分钟 "
   # source /etc/profile 报错 -bash: TMOUT: readonly variable，需要打开/etc/profile将#export TMOUT #readonly TMOUT 注释掉。 环境变量readonly TMOUT防止用户更改
-  #egrep -q "^\s*(export|)\s*TMOUT\S\w+.*$" /etc/profile && sed -ri "s/^\s*(export|)\s*TMOUT.\S\w+.*$/export TMOUT=600\nreadonly TMOUT/" /etc/profile || echo -e "export TMOUT=600\nreadonly TMOUT" >> /etc/profile
-  #source /etc/profile
+  egrep -q "^\s*(export|)\s*TMOUT\S\w+.*$" /etc/profile && sed -ri "s/^\s*(export|)\s*TMOUT.\S\w+.*$/export TMOUT=600\nreadonly TMOUT/" /etc/profile || echo -e "export TMOUT=600\nreadonly TMOUT" >> /etc/profile
+  source /etc/profile
   egrep -q "^\s*.*ClientAliveInterval\s\w+.*$" /etc/ssh/sshd_config && sed -ri "s/^\s*.*ClientAliveInterval\s\w+.*$/ClientAliveInterval 600/" /etc/ssh/sshd_config || echo "ClientAliveInterval 600" >> /etc/ssh/sshd_config
 }
 
@@ -673,9 +687,8 @@ EOF
 Os_Security_FilePermissions () {
 
   # (3) 设置或恢复重要目录和文件的权限
-  log_info "[-] 操作系统安全加固配置(符合等保要求-三级要求)-2..."
+  log_info "[-] 操作系统安全加固配置(符合等保要求-三级要求)-4..."
   log_info "[-] 设置或恢复重要目录和文件的权限(设置日志文件非全局可写)"
-  chmod 600 ~/.ssh/authorized_keys 2&>/dev/null
   chmod 755 /etc;
   chmod 755 /etc/passwd; 
   chmod 755 /etc/shadow; 
@@ -690,7 +703,7 @@ Os_Security_FilePermissions () {
   chmod 775 /var/log/maillog;
   chmod 775 /var/log/mail&>/dev/null 2&>/dev/null; 
   chmod 775 /var/log/localmessages&>/dev/null 2&>/dev/null
-  
+  chmod 600 ~/.ssh/authorized_keys 2&>/dev/null
   # 提高系统安全，更改其执行权限，解决Polkit 权限提升漏洞
   chmod 0755 /usr/bin/pkexec
 
@@ -726,15 +739,15 @@ Os_Security_Others () {
 # --set /apps/gnome-screensaver/mode blank-only
 
   # (11) 启防火墙服务
-  log_info "[-]开启防火墙服务..."
+  log_info "[-] 开启防火墙服务..."
+  yum -y install firewalld
   systemctl start firewalld.service
   systemctl enable firewalld.service
-  firewall-cmd --reload
+  sleep 2
   # 161端口是用于“Simple Network Management Protocol”,该协议主要用于管理TCP/IP网络中的网络协议，目前，几乎所有的网络设备厂商都实现对SNMP的支持。
   firewall-cmd --zone=public --add-port=161/udp --permanent
-  firewall-cmd --reload
-  
-  sleep 5
+  firewall-cmd --reload  
+  sleep 3
   
   # (12) 禁用CentOS服务器中 SELINUX
   log_info "[-] 禁用SELinux，永久关闭，重启服务器生效. " 
@@ -742,7 +755,7 @@ Os_Security_Others () {
   setenforce 0
   sed -i --follow-symlinks 's/SELINUX=enforcing/SELINUX=disabled/g' /etc/sysconfig/selinux
 
-  log_info "[-] 系统将在5s后重启。"
+  log_info "[-] \n系统将在5s后重启。"
   shutdown -r -t 5
 }
 
@@ -759,15 +772,16 @@ Os_Operation () {
   mv /usr/lib/systemd/system/ctrl-alt-del.target ${BACKUPDIR}/ctrl-alt-del.target-${EXEC_TIME}.bak
 
   # (1) 设置文件删除rm命令的别名
-  log_info "[-] 设置文件删除rm命令的别名(防止误删文件) "
-  sudo tee -a  /etc/profile.d/alias.sh <<'EOF'
+  log_info "[-] 设置文件删除rm命令的别名(防止误删数据，不删除而是移动到回收站) "
+sudo cat > /etc/profile.d/alias.sh <<EOF
 # User specific aliases and functions
 # 删除回收站
 # find ~/.trash -delete
 # 删除空目录
 # find ~/.trash -type d -delete
-alias rm="sh /usr/local/bin/remove.sh"
+alias rm='sh /usr/local/bin/remove.sh'
 EOF
+
   # $HOME是linux自身的变量，是当前用户的家目录变量，cd $HOME 进入当前用户的主目录
   sudo tee /usr/local/bin/remove.sh <<'EOF'
 #!/bin/sh
@@ -775,7 +789,7 @@ EOF
 trash="/.trash"
 deltime=$(date +%Y%m%d-%H-%M-%S)
 TRASH_DIR="${HOME}${trash}/${deltime}"
-# 建立回收站目录当不存在的时候
+# 回收站目录不存在则创建
 if [ ! -e ${TRASH_DIR} ];then
    mkdir -p ${TRASH_DIR}
 fi
@@ -783,17 +797,18 @@ for i in $*;do
   if [ "$i" = "-rf" ];then continue;fi
   # 防止误操作
   if [ "$i" = "/" ];then echo '# Danger delete command, Not delete / directory!';exit -1;fi
-	#定义秒时间戳
-	STAMP=$(date +%s)
-	#得到文件名称(非文件夹)，参考man basename
-	fileName=$(basename $i)
-	#将输入的参数，对应文件mv至.trash目录，文件后缀，为当前的时间戳
-	mv $i ${TRASH_DIR}/${fileName}.${STAMP}
+
+  #定义秒时间戳
+  STAMP=$(date +%s)
+  #得到文件名称(非文件夹)，参考man basename
+  fileName=$(basename $i)
+  #将输入的参数，对应文件mv至.trash目录，文件后缀，为当前的时间戳
+  mv $i ${TRASH_DIR}/${fileName}.${STAMP}
 done
 EOF
   sudo chmod +775 /usr/local/bin/remove.sh /etc/profile.d/alias.sh
   sudo chmod a+x /usr/local/bin/remove.sh /etc/profile.d/alias.sh
-  source /etc/profile.d/alias.sh
+  source /etc/profile.d/alias.sh  
   source /etc/profile
 }
 
@@ -894,12 +909,14 @@ function Change_SShPort() {
 
   log_info "[-] 设置完毕，请使用ssh端口 ${SSH_PORT} 登陆 "
   
+
+  
 }
 
 ## 用途: 执行更改ssh端口号
 function run_change_sshport() {
 
-  read -r -p "Do you agree to change the SSH port to ${SSH_PORT} ? If not, please enter new port? [Y/n] " -t 30 input_ssh_yn
+  read -r -p "Do you agree change the SSH port to ${SSH_PORT} ? If not, please enter another port? [Y/n] " -t 30 input_ssh_yn
   case $input_ssh_yn in
       [yY][eE][sS]|[yY])
           echo -e "\033[32mYes, continue...\033[0m"
@@ -919,6 +936,7 @@ function run_change_sshport() {
           ;;
   esac
 
+  log_warning  "[-!] 不要将 sshd 对 Internet 开放登陆权限，尽量将SSH局限在几个小范围内的 IP，请你另行设置！"
 }
 
 ## 名称: Os_Kernel_Upgrade
@@ -1149,7 +1167,7 @@ function run_add_user() {
   # create group if not exists
   add_group
 
-  read -p "将创建拥有管理权限的普通用户(${user_name}):" input_user_name
+  read -p "创建拥有管理权限的普通用户 ${user_name} (直接回车键)，若自定义名请输入:" input_user_name
   # 若没有输入，则使用默认值
   if [  -z "$input_user_name" ];then
         input_user_name=${user_name}
@@ -1170,7 +1188,7 @@ function run_add_user() {
 ## 参数: 无
 function Force_UserNextLogin_ChangePwd() {
 
-  log::info "[-] 强制用户在下次登录时更改密码... "
+  log_info "[-] 强制用户在下次登录时更改密码... "
 
   Tmp_DefaultUser="root"
 
@@ -1198,20 +1216,65 @@ function Force_UserNextLogin_ChangePwd() {
 
 }
 
+## 名字：Permit_RootSshLogin
+## 用途：禁止或允许root用户ssh远程登陆，等保三级要求禁止root远程登陆
+## 参数: 无
+function Root_NoLogin() {
+
+  read -r -p "禁止root远程登陆，普通用户你已创建好了吗? [Y/n] " -t 30 input_rootlogin_yn
+  case $input_rootlogin_yn in
+      [yY][eE][sS]|[yY])
+          log_info "[-] yes 已创建普通用户，继续禁止root用户ssh远程登陆... "
+          egrep -q "^\s*PermitRootLogin\s+.+$" /etc/ssh/sshd_config && sed -ri "s/^\s*PermitRootLogin\s+.+$/PermitRootLogin no/" /etc/ssh/sshd_config || echo "PermitRootLogin no" >> /etc/ssh/sshd_config
+          systemctl restart sshd
+          ;; 
+      [nN][oO]|[nN])          
+	      log_info "[-] no 没创建普通用户，还不能禁止root远程登陆... "		 
+          ;; 
+      *)
+          echo -e "\033[31merror! you input isn't yes or no.\n\033[0m"
+          exit 1
+          ;;
+  esac
+  
+}
+
+function Permit_RootSshLogin() {
+  
+  read -r -p "你想禁止还是允许root用户ssh远程登陆? [Y禁止/n允许] " -t 30 input_rootlogin_yn
+  case $input_rootlogin_yn in
+      [yY][eE][sS]|[yY])
+          Root_NoLogin
+          ;; 
+      [nN][oO]|[nN])          
+	      log_info "[-] 允许root用户ssh远程登陆... "
+		  egrep -q "^\s*PermitRootLogin\s+.+$" /etc/ssh/sshd_config && sed -ri "s/^\s*PermitRootLogin\s+.+$/PermitRootLogin yes/" /etc/ssh/sshd_config || echo "PermitRootLogin yes" >> /etc/ssh/sshd_config
+          systemctl restart sshd
+          ;; 
+      *)
+          echo -e "\033[31merror! you input isn't yes or no.\n\033[0m"
+          exit 1
+          ;;
+  esac
+  
+}
+
 ## 名字：Trash_Clear
 ## 用途：清空回收站，清除历史*.gz日志
 ## 参数: 无
 function Trash_Clear() {
 
   log_info "[-] （1）清空回收站... " 
-  # 删除以前定义的别名。 
+
   # 附-如何防止rm误删数据，1）为rm设置了别名，2）放弃使用rm改用mv\find ，3）不删除，移动到回收站，4）不要这样用rm -fr /opt/* 正确做法是先切换到指定目录下再删除
-  # rm 默认开启了alias保护，等同于rm -i，在删除之前会提示是否删除。 
-  # 如果alias表里头没有rm，那么会提示-bash: unalias: rm: not found，这里通过把错误输出抑制，输出重定向到/dev/null
-  unalias rm  > /dev/null 2>&1
+  # 查看rm别名# alias rm ，默认设置的别名 # alias rm='rm -i'   rm默认开启了alias保护，在删除之前会提示是否删除。
+  # 删除以前定义rm的别名。 
+  #unalias rm  > /dev/null 2>&1
+  #alias rm='rm -i'
+  
   # 删除家目录回收站中的文件，即清空垃圾桶
   find ~/.trash/* -delete 2> /dev/null
-  # 删除其他用户家目录中的回收站中的文件目录
+  # 删除其他用户(家目录)中的回收站中的文件目录
   find /home/ -type d -name .trash -exec find {} -delete \;
 
   log_info "[-] （2）清理log日志... "  
@@ -1222,6 +1285,25 @@ function Trash_Clear() {
   find /var/log -name "system@*" -delete
   find /var/log -name "user-1000@*" -delete
   find /tmp/* -delete 2> /dev/null
+  
+  log_warning "[-!] 询问要不要去掉回收站机制（测试类服务器不需要回收站）..."
+  
+  echo -e -n "\033[31m\n你要去掉回收站机制吗? [Y去掉/n保留]:\033[0m"
+  read -t 30 input_trash_yn
+  case $input_trash_yn in
+      [yY][eE][sS]|[yY])
+          unalias rm  > /dev/null 2>&1
+          alias rm='rm -i'         
+          ;; 
+      [nN][oO]|[nN]) 
+	      unalias rm  > /dev/null 2>&1
+	      alias rm='sh /usr/local/bin/remove.sh'
+          ;; 
+      *)
+          echo -e "\033[31merror! you input isn't yes or no.\n\033[0m"
+          exit 1
+          ;;
+  esac
 }
 
 
@@ -1231,53 +1313,56 @@ function cmd_info_print() {
   echo -e '\033[32m 
 ==========================请选择要操作的项：==========================
 # [0]  创建SWAP交换分区(默认2G) 
-# [1]  设置国内yum源并在线yum安装常用软件
-# [2]  网卡设置静态IP(根据提示，输入ip\子网掩码\默认网关），设置DNS
-# [3]  系统优化、安全加固等一键设置以下：
+# [1]  设置网卡静态IP和DNS(按引导输入ip\子网掩码\默认网关)
+#      + <11> 全局配置DNS
+#      + <12> 判断能不能上网
+# [2]  在线设置国内yum源，在线yum安装常用软件（htop\ncdu比du性能强\...）
+# [3]  系统优化、安全加固等一键设置：
 #      + <31> 系统的最大文件打开数限制，系统内核参数优化(含关闭ipv6)
-#      + <32> 主机时区设置为东8区
-#      + <33> 禁用ctrl+alt+del重启系统、定义回收站目录等安全运维有关的事项
-#      + <  > 系统安全加固(等保三级操作系统主机检查项)如下：
+#      + <32> 时区设置为东8区
+#      + <33> 禁用ctrl+alt+del重启系统、定义回收站目录等
+#      + <  > 系统安全加固(等保三级-操作系统检查项)如下：
 #              ++ <35> 用户口令策略(密码过期90天、到期前15天提示、密码长度至少15等)
 #              ++ <36> GRUB 安全设置
 #              ++ <37> ssh安全加固设置
 #              ++ <38> 设置或恢复重要目录和文件的权限
 #              ++ <39> 开启防火墙、禁用SELINUX等更多设置，然后重启主机
-# [4]  更改ssh登陆端口号(默认改为40107)
-# [5]  创建一个拥有管理权限的(默认uudocker)普通用户，执行sodu命令需要输入密码
-# [6]  使用Chrony配置主机时间同步(根据实际环境进行，可选项)
-# [7]  禁用与设置系统中的某些服务(根据实际环境进行，可选项)
-# [8]  强制用户在下次登录时更改密码
-# [9]  清空垃圾回收站（无意中执行rm误删时，它可拯救你）
-# [10] 判断能不能上网
+# [4]  更改ssh端口号(等保要求不使用22端口，缺省时改为40107)
+# [5]  创建一个拥有管理权限的普通用户(uudocker)，执行sodu命令时需要输入密码
+# [6]  禁止或允许root用户远程登陆(等保要求禁止root远程登陆,正解:普通用户登陆后su root）
+# [7]  强制用户在下次登录时更改密码
+# [8]  使用Chrony配置主机时间同步(根据环境需要，可选项)
+# [9]  禁用与设置系统中的某些服务(根据环境需要，可选项)
+# [10] 清空回收站内容 and 询问你删除回收站功能吗？（执行rm误删时，它可拯救你）
+#
 # 以下脚本，仅供参考：
 #       Os_Kernel_Upgrade 推荐"离线升级系统内核"
 #       disk_Lvsmanager 磁盘LVS逻辑卷添加与配置\033[32m
 =====================================================================
 \033[31m注意：
 	1. 切换用户的命令su已改为大写的SU
-	2. 回收站目录：cd ${HOME}/.trash ,不断堆积会导致空间不足哦！
+	2. 回收站目录 cd ${HOME}/.trash 会不断堆积会导致空间不足哦！日志定时清理脚本记得不要用rm改用find或其他切分工具
 	3. 用户终端执行的历史命令记录保存目录为/var/log/.history/${USER}.${LOGTIME}.history\033[0m'
 
 }
 
 function run_main(){
 
-  log_info "->->-> run start..."
+  log_info "run start..."
 
   # 1. 判断系统内核
-  kernel=$(uname -r) && log_info "[-]此系统的内核为：$kernel" 
-  result=$(echo $kernel | grep "3.10") && echo $result
+  kernel=$(uname -r) && log_info "[-] 此系统的内核为：$kernel" 
+  result=$(echo $kernel | grep "3.10")
   if [[ "$result" != "" ]];  then
       #echo "包含"
-	  log_warning "[-!]Centos7操作系统内核默认是3.10.x存在一些Bugs，请尽快升级！ " 
+	  log_warning "[!] Centos7操作系统默认内核3.10存在一些Bugs，请尽快升级。" 
   fi
 
-  log_info "[-]本系统的openssh 版本：" && ssh -V 
+  log_info "[-] 本系统的openssh 版本：" && ssh -V 
   result_openssh=$(rpm -qi openssh |grep "openssh-7.4")
   if [[ "$result_openssh" != "" ]];  then
       #echo "包含"
-	  log_warning "openssh默认版本是7.4存在安全漏洞，请尽快升级到最新版本 "
+	  log_warning "[!] openssh默认版本是7.4存在安全漏洞，请尽快升级到最新版本。"
   fi
 
   # 2. 打印出选择项
@@ -1298,13 +1383,13 @@ function run_main(){
 		 Os_Swap
          ;;
       1) 
-         # 设置国内yum源、安装常用软件
-         Os_YumSource_Aliyun
-		 Os_Yum_Install_Software
-         ;;
-	  2) 
          # 网卡设置静态IP(根据提示，输入ip\子网掩码\默认网关），设置DNS
          Os_Network
+         ;;
+	  2) 
+         # 在线设置国内yum源、安装常用软件
+         Os_YumSource_Aliyun
+		 Os_Yum_Install_Software
          ;;
       3) 
         ## 系统优化、安全加固等，一键设置
@@ -1314,6 +1399,8 @@ function run_main(){
 		 Os_TimedataZone
 		 # 禁用ctrl+alt+del重启系统、定义回收站文件夹目录等安全运维有关的设置
 		 Os_Operation
+		 # 防止不生效，单独再执行一下
+		 source /etc/profile.d/alias.sh
 
 		 # 安全加固-用户口令策略
 		 Os_Security_UserPwd
@@ -1339,9 +1426,11 @@ function run_main(){
       33) 
          # 禁用ctrl+alt+del重启系统、定义回收站文件夹目录等安全运维有关的设置
          Os_Operation
+		 # 防止不生效，单独再执行一下
+		 source /etc/profile.d/alias.sh
          ;;
       34) 
-		 log_warning "此选项未配置,请选择其他名目的序号"
+		 log_warning "[-!] 此选项未配置,请选择其他名目的序号"
          ;;
       35) 
          # 安全加固-用户口令策略
@@ -1372,40 +1461,50 @@ function run_main(){
          run_add_user
          ;;
       6) 
+         # 禁止或允许root远程登录（若禁止root远程登陆，确保已创建了普通用户）
+         Permit_RootSshLogin
+         ;;
+      7) 
+         # 强制用户在下次登录时更改密码
+         Force_UserNextLogin_ChangePwd
+         ;;	
+      8) 
          # 配置主机时间同步(使用Chrony，根据实际环境进行，可选项)
          Os_HostTimeSync_Chrony
          ;;
-      7) 
+      9) 
          # 禁用与设置操作系统中某些服务(根据实际环境进行，可选项)
          Os_Disable_SomeServices
          ;;
-      8) 
-         # 强制用户在下次登录时更改密码
-         Force_UserNextLogin_ChangePwd
-         ;;
-	  9) 
-         # 清空回收站、清理log日志
+      10) 
+         # 清空回收站，清理log日志
          Trash_Clear
          ;;
-	  10) 
+      11) 
+         # 全局配置DNS
+         setDNS
+         ;;
+      12) 
          # 判断能不能上网
          internetCheck
          if [ $? -eq 0 ];then  
 		      echo -e "\033[31m主机无法上网，请检查网络设置！\n\033[0m"; 
-		 else
-		      echo -e "\033[32m哇塞，可以上网冲浪。\n\033[0m"; 
-		 fi
+			  # 配置下dns
+              setDNS
+         else
+		      echo -e "\033[32m哇塞，可以上网冲浪啦！\n\033[0m"; 
+         fi
          ;;
       *) 
-	     # 打印出选择项
+         # 打印出选择项
          cmd_info_print
-		 ((autoprintcmd_count++))
+         ((autoprintcmd_count++))
          ;; 
     esac
 
   done
   
-  log_info "->->-> run end, good by!"
+  log_info " It's over, Good night. Bye!"
 
 }
 

@@ -1,0 +1,77 @@
+查看操作系统版本
+lsb_release -a
+
+1、查看唯一性，账户，空密码
+more /etc/passwd
+more /etc/shadow
+
+!!或*表示账户不能登录，新建用户如果不设密码，也会显示!!，表示不能登录
+
+2、查看密码复杂度
+more /etc/login.defs
+PASS_MAX_DAYS   99999 密码有效期
+PASS_MIN_DAYS   0     密码最短修改时间
+PASS_MIN_LEN    5     密码最小长度
+PASS_WARN_AGE   7     密码过期提前7天提示修改
+
+more /etc/pam.d/system-auth
+password requistite pam_cracklib.so 
+retry=3(密码尝试3次) difok=3（最少不同字符）minlen=10（最小长度）ucredit=1（最少大写字母）lcredit=3（最少小写字母）dcredit=3（最少数字）
+redhat5以后使用pam_tally2.so控制密码认证失败的次数上限，可实现登陆次数、超时时间、解锁时间等。
+
+more /etc/profile
+查看TMOUT超时设置
+
+3、远程管理
+service --status-all|grep sshd，查看sshd是否开启
+netstat -an|grep 22 查看端口
+service --status-all|grep running，查看是否开启telnet
+
+
+4、访问控制-应对用户分配权限----配置文件不能大于644，可执行文件不能大于755
+
+
+5、重命名或删除默认用户，root禁止远程登陆。
+ more /etc/ssh/sshd_config，查找#PermitRootLogin yes；禁止root远程应该为PermitRootLogin no
+
+6、最小权限
+more /etc/sudo.conf，查看root级权限授予了哪些用户
+
+7、敏感标记
+more /etc/selinux/config 
+
+SELINUXTYPE=targeted 默认策略，对大部分网络服务进程进行管制
+SELINUXTYPE=minimum 以targeted为基础，仅对选定的网络服务进程进行管制（一般不用）
+SELINUXTYPE=mls 多级安全保护对所有进程进行管制。
+
+SELINUX=permissive 宽容模式 只记录
+SELINUX=enforceing 强致模式 阻止并记录（这项符合测评要求，其他项不符合）
+SELINUX=disabled 关闭
+
+8、安全审计
+ps -ef |grep auditd，查看服务进程
+service auditd status 查看服务状态
+service rsyslog status 查看服务状态
+more /etc/audit/auditd.conf 查看审计配置
+more /etc/audit/audit.rules 查看审计规则，监控文件系统行为（4个动作，r、w、x、a，读、写、执行、修改属性）
+例如：-w /etc/passwd -p wa，监控passwd文件的写入和修改行为（-w，路径；-p，需要监控的权限是wa，写和修改）
+
+-D    (刪除舊記錄，預設-D)
+-b 8192  (buffer大小，預設256，改為8192)
+-f 1  (失敗控制旗標，可設為 0 (silent), 1 (印出錯誤，預設), and 2 (panic, 把系統關閉—非正常關閉，所以會有資料遺失的風險).
+
+tail -20 /var/log/audit/audit.log 查看后20行日志
+
+9、入侵检测
+yum list installed 查看安装了哪些程序包
+
+service --status-all|grep running，查看是否关闭危险网络服务
+netstat -ntlp 查看开放端口
+
+cat /etc/host.allow 查看是否现在远程登陆地址范围
+cat /etc/host.deny
+是否从防火墙上做了限制
+
+rpm -qa |grep patch 查看补丁安装情况
+
+ more /var/log/secure |grep refused 查看入侵拒绝情况。
